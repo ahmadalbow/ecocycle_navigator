@@ -39,12 +39,9 @@ INSTALLED_APPS = [
     'django.contrib.messages',
     'django.contrib.staticfiles',
     'corsheaders',
-
-    # Third-party apps
     'rest_framework',  # For API endpoints
     'api',
-    # Your apps
-    'core',
+
 ]
 
 MIDDLEWARE = [
@@ -94,7 +91,8 @@ DATABASES = {
 }
 TOMTOM_API_KEY   = "eQRZvUOMU1LkLW7lnk1Jcw1RmMRA39JF"
 OPENWEATHER_API_KEY = "43ef469c307359d15fd668155c5d09de"
-token = "fb0651b22a80a3e174651ce8b1c458974ff8233d"
+AQICN_TOKEN = "fb0651b22a80a3e174651ce8b1c458974ff8233d"
+OWM_KEY     = "43ef469c307359d15fd668155c5d09de"
 # Password validation
 # https://docs.djangoproject.com/en/5.0/ref/settings/#auth-password-validators
 

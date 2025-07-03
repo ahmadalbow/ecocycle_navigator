@@ -64,6 +64,7 @@ def preload_dresden_tiles(zoom=15, flow_type='relative'):
                 transformer=lambda px, py: pixel2deg(x, y, zoom, px, py)
             )
             PRELOADED_TILES[key] = tile
+   
 
 
 PRELOADED_AIR_QUALITY = {}
@@ -77,41 +78,82 @@ def lonlat_grid_points(min_lon, max_lon, min_lat, max_lat, step=0.01):
             lon += step
         lat += step
 
+def fetch_owm_components(lat, lon):
+    url = (
+        f"http://api.openweathermap.org/data/2.5/air_pollution"
+        f"?lat={lat}&lon={lon}&appid={settings.OWM_KEY}"
+    )
+    r = requests.get(url, timeout=5)
+    r.raise_for_status()
+    comp = r.json().get("list", [{}])[0].get("components", {})
+    return {
+        "pm2_5": comp.get("pm2_5"),
+        "pm10":  comp.get("pm10"),
+        "no2":   comp.get("no2"),
+        "o3":    comp.get("o3"),
+    }
 
-def preload_air_quality_data():
-    """
-    Preload air‐quality data for Dresden grid points using AQICN JSON API.
-    """
-    for lat, lon in lonlat_grid_points(MIN_LON, MAX_LON, MIN_LAT, MAX_LAT):
-        print(lat,lon)
-        try:
-            # AQICN JSON API: geo lookup by lat;lon
-            url = (
-                f"https://api.waqi.info/feed/geo:{lat};{lon}/"
-                f"?token=fb0651b22a80a3e174651ce8b1c458974ff8233d"
-            )
-            res = requests.get(url, timeout=5)
-            res.raise_for_status()
 
-            resp = res.json()
-            # Ensure we got a good response
-            if resp.get("status") != "ok":
-                raise ValueError(f"API status={resp.get('status')}")
+def preload_air_quality_to_csv(min_lon  = MIN_LON, max_lon = MAX_LON, min_lat = MIN_LAT, max_lat = MAX_LAT, step = 0.01, output_csv= r"C:\Users\ahmad\Documents\Projects\ecocycle_navigator\Data\AirQuality\dresden_air_quality.csv"):
+    fieldnames = [
+        "lat", "lon",
+        "pm2_5", "pm10", "no2", "o3",
+        "timestamp",
+        "status", "error"
+    ]
 
-            data = resp["data"]
-            iaqi = data.get("iaqi", {})
+    with open(output_csv, "w", newline="", encoding="utf-8") as csvfile:
+        writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+        writer.writeheader()
 
-            # Extract each pollutant (v = value)
-            PRELOADED_AIR_QUALITY[(lat, lon)] = {
-                "pm2_5": iaqi.get("pm25", {}).get("v", None),
-                "pm10": iaqi.get("pm10", {}).get("v", None),
-                "no2": iaqi.get("no2",  {}).get("v", None),
-                "o3":  iaqi.get("o3",   {}).get("v", None),
-                "co":  iaqi.get("co",   {}).get("v", None),
-                "timestamp": data["time"]["iso"],  # ISO timestamp of measurement
+        for lat, lon in lonlat_grid_points(min_lon, max_lon, min_lat, max_lat, step):
+            row = {
+                "lat": lat, "lon": lon,
+                "pm2_5": None, "pm10": None, "no2": None, "o3": None,
+                "timestamp": None,
+                "status": None, "error": None
             }
-        except Exception as e:
-            print(f"Failed to fetch AQICN data for {lat},{lon}: {e}")
+
+            # 1) try AQICN up to MAX_RETRIES – no sleep between attempts
+            for attempt in range(1, 4):
+                url = f"https://api.waqi.info/feed/geo:{lat};{lon}/?token={settings.AQICN_TOKEN}"
+                try:
+                    resp = requests.get(url, timeout=5)
+                    resp.raise_for_status()
+                    data = resp.json()
+                    row["status"] = data.get("status")
+
+                    if row["status"] == "ok":
+                        iaqi = data["data"].get("iaqi", {})
+                        row.update({
+                            "pm2_5": iaqi.get("pm25", {}).get("v"),
+                            "pm10":  iaqi.get("pm10", {}).get("v"),
+                            "no2":   iaqi.get("no2",  {}).get("v"),
+                            "o3":    iaqi.get("o3",   {}).get("v"),
+                            "timestamp": data["data"]["time"]["iso"],
+                        })
+                        break
+                    else:
+                        row["error"] = f"AQICN status={row['status']}"
+                except Exception as e:
+                    row["status"] = "error"
+                    row["error"]  = f"AQICN error={e}"
+
+                # immediately loop again (no delay) until attempts exhausted
+
+            # 2) fallback to OWM for any missing pollutant
+            missing = [p for p in ("pm2_5", "pm10", "no2", "o3") if row[p] is None]
+            if missing:
+                try:
+                    owm = fetch_owm_components(lat, lon)
+                    for p in missing:
+                        row[p] = owm.get(p)
+                    row["error"] = (row["error"] or "") + "; filled_from_OWM"
+                except Exception as e:
+                    row["error"] = (row["error"] or "") + f"; OWM error={e}"
+
+            writer.writerow(row)
+            print(f"Wrote {lat},{lon}: status={row['status']} missing={missing}")
 
 
 def load_preloaded_air_quality(csv_path):
@@ -143,6 +185,23 @@ def load_preloaded_air_quality(csv_path):
                 "co":   to_float(row.get("co")),
                 "timestamp": row.get("timestamp"),
             }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 # def preload_air_quality_data():

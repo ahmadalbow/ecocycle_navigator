@@ -3,24 +3,28 @@
 import os
 import json
 
+from django.conf import settings
 from django.shortcuts import render
 from django.http import JsonResponse
 
+import requests
 from rest_framework.response import Response
 from rest_framework.decorators import api_view
 
 from api.services.tomtom_client import TomTomClient
 from api.services.scorers import AccidentScorer, NoiseScorer, TrafficScorer, AirQualityScorer
-from core.tomtom import TomTomRouter
+
 
 import pandas as pd
 import pyproj
 from shapely.geometry import Point, LineString
 from shapely.ops import transform
 from rtree import index
+from api.services.Data import PRELOADED_AIR_QUALITY
+from rest_framework import status
 
 
-ACCIDENT_CSV  = r"C:\Users\ahmad\Documents\Projects\ecocycle_navigator\Data\Accidents\accidents_dresden_bikes.csv" 
+ACCIDENT_CSV  = r"C:\Users\ahmad\Documents\Projects\ecocycle_navigator\Data\Accidents\accidents_dresden_bikes_2016_2023.csv" 
 BUFFER_M = 10.0
 
 @api_view(['GET'])
@@ -109,10 +113,8 @@ def get_accidents(request):
       [{ id, latitude, longitude, timestamp }, ...]
     """
     df = pd.read_csv(ACCIDENT_CSV)
-    df = df[df['IstRad'] == 1].copy()
-    # parse coords
-    df['lon'] = df['XGCSWGS84'].str.replace(',', '.').astype(float)
-    df['lat'] = df['YGCSWGS84'].str.replace(',', '.').astype(float)
+    
+
     # human‐readable timestamp
     df['timestamp'] = df.apply(
         lambda r: f"{int(r.UJAHR)}-{int(r.UMONAT):02d} {int(r.USTUNDE):02d}:00",
@@ -158,8 +160,8 @@ def get_rout(request):
     # 3) instantiate scorers
     accident_scorer = AccidentScorer(
         accident_csv=ACCIDENT_CSV,
-        decay_lambda=0.3,
-        K=2.0,
+        decay_lambda=0.20,
+        K=1,
         buffer_m=BUFFER_M
     )
     traffic_scorer = TrafficScorer(
@@ -221,3 +223,63 @@ def get_rout(request):
         })
        
     return JsonResponse({'routes': response_routes}, status=200)
+
+import math
+import requests
+from django.conf import settings
+from django.http import HttpResponse, Http404
+from rest_framework.decorators import api_view
+
+
+
+
+from api.services.Data import PRELOADED_TILES, PRELOADED_NOISE
+
+@api_view(['GET'])
+def get_traffic_flow(request):
+    features = []
+    for tile in PRELOADED_TILES.values():
+        layer = next(iter(tile.values()))
+        features.extend(layer['features'])
+    geojson = {"type": "FeatureCollection", "features": features}
+    return JsonResponse(geojson, status=200)
+
+@api_view(['GET'])
+def get_noise(request):
+    features = json.loads(PRELOADED_NOISE.to_json())["features"]
+    return JsonResponse({"type": "FeatureCollection", "features": features}, status=200)
+
+
+# @api_view(['GET'])
+# def get_air_quality(request):
+#     """
+#     Proxies a single AQICN map tile covering Dresden.
+#     Computes the center tile at a given zoom, fetches it from AQICN,
+#     and returns the PNG directly to the client.
+#     """
+#     # Bounding box for Dresden: south, west, north, east
+#     south, west, north, east = 51.0, 13.5, 51.2, 13.9
+#     # Compute center of bounding box
+#     center_lat = (south + north) / 2.0
+#     center_lon = (west + east) / 2.0
+
+#     # Zoom level for tile (choose a zoom that covers entire city)
+#     zoom = 11
+
+#     # Convert lat/lon to tile x,y
+#     lat_rad = math.radians(center_lat)
+#     n = 2 ** zoom
+#     tile_x = int((center_lon + 180.0) / 360.0 * n)
+#     tile_y = int((1.0 - math.log(math.tan(lat_rad) + 1 / math.cos(lat_rad)) / math.pi) / 2.0 * n)
+
+#     # Fetch tile from AQICN
+#     token = settings.AQICN_TOKEN
+#     tile_url = f"https://tiles.aqicn.org/tiles/usepa-aqi/{zoom}/{tile_x}/{tile_y}.png?token={token}"
+#     try:
+#         resp = requests.get(tile_url, timeout=5)
+#         resp.raise_for_status()
+#     except requests.RequestException:
+#         raise Http404("AQI tile not available")
+
+#     # Return the PNG directly
+#     return HttpResponse(resp.content, content_type='image/png')

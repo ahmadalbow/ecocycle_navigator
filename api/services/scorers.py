@@ -61,8 +61,8 @@ class AccidentScorer:
 
         # load & filter
         df = pd.read_csv(accident_csv)
-        df["lon"] = df["XGCSWGS84"].str.replace(",", ".").astype(float)
-        df["lat"] = df["YGCSWGS84"].str.replace(",", ".").astype(float)
+        # df["lon"] = df["XGCSWGS84"].str.replace(",", ".").astype(float)
+        # df["lat"] = df["YGCSWGS84"].str.replace(",", ".").astype(float)
         df["pt_wgs"] = df.apply(lambda r: Point(r.lon, r.lat), axis=1)
         df["pt_proj"] = df["pt_wgs"].apply(lambda p: transform(self.project, p))
         df["timestamp"] = df.apply(
