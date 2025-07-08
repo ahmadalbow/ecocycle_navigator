@@ -241,6 +241,7 @@ class AirQualityScorer:
             return 0.0
 
         scores = [seg["air_quality_score"] for seg in segments]
+        print(scores)
         l = min(scores)
         a = sum(scores) / len(scores)
         # print(f"l = {l}, a = {a}")

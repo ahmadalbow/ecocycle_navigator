@@ -27,82 +27,7 @@ from rest_framework import status
 ACCIDENT_CSV  = r"C:\Users\ahmad\Documents\Projects\ecocycle_navigator\Data\Accidents\accidents_dresden_bikes_2016_2023.csv" 
 BUFFER_M = 10.0
 
-@api_view(['GET'])
-def get_rout(request):
-    # 1) Parse & validate input coordinates
-    start_lat = request.GET.get('start_lat')
-    start_lon = request.GET.get('start_lon')
-    end_lat   = request.GET.get('end_lat')
-    end_lon   = request.GET.get('end_lon')
-    # build global accidents list
-    df_all = pd.read_csv(ACCIDENT_CSV)
-    df_all = df_all[df_all['IstRad'] == 1].copy()
-    df_all['lon'] = df_all['XGCSWGS84'].str.replace(',', '.').astype(float)
-    df_all['lat'] = df_all['YGCSWGS84'].str.replace(',', '.').astype(float)
-    df_all['timestamp'] = df_all.apply(
-        lambda r: f"{int(r.UJAHR)}-{int(r.UMONAT):02d} {int(r.USTUNDE):02d}:00", axis=1
-    )
-    df_all = df_all.reset_index(drop=True)
-    df_all['id'] = df_all.index
-    all_accidents = df_all[['id','lat','lon','timestamp']].rename(
-        columns={'lat':'latitude','lon':'longitude'}
-    ).to_dict(orient='records')
 
-    if not all([start_lat, start_lon, end_lat, end_lon]):
-        return JsonResponse(
-            {'error': 'Missing required coordinates. Provide start_lat, start_lon, end_lat, end_lon.'},
-            status=400
-        )
-
-    try:
-        start_lat = float(start_lat); start_lon = float(start_lon)
-        end_lat   = float(end_lat);   end_lon   = float(end_lon)
-    except ValueError:
-        return JsonResponse({'error': 'Coordinates must be valid numbers.'}, status=400)
-
-    # 2) Instantiate TomTom client and scorers
-    tomtom = TomTomClient(api_key="eQRZvUOMU1LkLW7lnk1Jcw1RmMRA39JF")
-    traffic_scorer = TrafficScorer(tomtom_client=tomtom, zoom=15)
-
-    # 3) TomTom expects (lon, lat)
-    start = ( start_lat, start_lon)
-    end   = ( end_lat,end_lon)
-    # 4) Fetch up to 3 alternative bicycle routes
-    raw_routes = tomtom.fetch_routes(start, end, travel_mode="bicycle", max_alternatives=3)
-    if not raw_routes:
-        return JsonResponse({"error": "No routes"}, status=404)
-
-    # 3) init scorer once
-    scorer = AccidentScorer(ACCIDENT_CSV, decay_lambda=0.3, K=2.0, buffer_m=BUFFER_M)
-
-    response_routes = []
-    for rt in raw_routes:
-        geom = rt["geometry"]
-
-        # a) find accidents on entire route
-        acc_on_route = scorer.get_accidents_on_route(geom)
-
-        # b) split into segments
-        segments_geo = tomtom.split_geometry(geom, segment_length_m=50.0)
-
-        # c) annotate each segment
-        segments_out = scorer.annotate_segments(segments_geo, acc_on_route)
-        road_score = scorer.score_route(segments_out)
-        road_traffic_score  = traffic_scorer.score_route(segments_out)
-
-        response_routes.append({
-            "distance_m":   rt["distance_m"],
-            "duration_s":   rt["travel_time_s"],
-            "geometry":     [{"latitude": p[0], "longitude": p[1]} for p in geom],
-            "segments":     segments_out,
-            "accidents":    acc_on_route[["id","lat","lon","timestamp"]]
-                               .rename(columns={"lat":"latitude","lon":"longitude"})
-                               .to_dict(orient="records"),
-            "road_score":  road_score,
-
-        })
-
-    return JsonResponse({"routes": response_routes, "accidents": all_accidents}, status=200)
 
 
 
@@ -160,8 +85,8 @@ def get_rout(request):
     # 3) instantiate scorers
     accident_scorer = AccidentScorer(
         accident_csv=ACCIDENT_CSV,
-        decay_lambda=0.20,
-        K=1,
+        decay_lambda=0.3,
+        K=1.3,
         buffer_m=BUFFER_M
     )
     traffic_scorer = TrafficScorer(

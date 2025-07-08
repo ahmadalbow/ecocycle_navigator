@@ -25,9 +25,6 @@ def lonlat_to_tile(lon, lat, zoom):
               - math.log(math.tan(lat_rad) + 1 / math.cos(lat_rad)) / math.pi
              ) / 2.0 * n)
     return xt, yt
-
-
-
 def pixel2deg(xtile, ytile, zoom, xpixel, ypixel, extent=4096):
         """
         Transformiert Tile-Koordinaten in Lon/Lat (WGS84).
@@ -39,10 +36,6 @@ def pixel2deg(xtile, ytile, zoom, xpixel, ypixel, extent=4096):
         lat = math.degrees(math.atan(math.sinh(math.pi * (1 - 2 * yt / n))))
         return lon, lat
 
-
-# upper-right
-
-# module‐level cache
 PRELOADED_TILES = {}
 
 def preload_dresden_tiles(zoom=15, flow_type='relative'):
@@ -115,29 +108,28 @@ def preload_air_quality_to_csv(min_lon  = MIN_LON, max_lon = MAX_LON, min_lat = 
             }
 
             # 1) try AQICN up to MAX_RETRIES – no sleep between attempts
-            for attempt in range(1, 4):
-                url = f"https://api.waqi.info/feed/geo:{lat};{lon}/?token={settings.AQICN_TOKEN}"
-                try:
-                    resp = requests.get(url, timeout=5)
-                    resp.raise_for_status()
-                    data = resp.json()
-                    row["status"] = data.get("status")
+            
+            url = f"https://api.waqi.info/feed/geo:{lat};{lon}/?token={settings.AQICN_TOKEN}"
+            try:
+                resp = requests.get(url, timeout=5)
+                resp.raise_for_status()
+                data = resp.json()
+                row["status"] = data.get("status")
 
-                    if row["status"] == "ok":
-                        iaqi = data["data"].get("iaqi", {})
-                        row.update({
-                            "pm2_5": iaqi.get("pm25", {}).get("v"),
-                            "pm10":  iaqi.get("pm10", {}).get("v"),
-                            "no2":   iaqi.get("no2",  {}).get("v"),
-                            "o3":    iaqi.get("o3",   {}).get("v"),
-                            "timestamp": data["data"]["time"]["iso"],
-                        })
-                        break
-                    else:
-                        row["error"] = f"AQICN status={row['status']}"
-                except Exception as e:
-                    row["status"] = "error"
-                    row["error"]  = f"AQICN error={e}"
+                if row["status"] == "ok":
+                    iaqi = data["data"].get("iaqi", {})
+                    row.update({
+                        "pm2_5": iaqi.get("pm25", {}).get("v"),
+                        "pm10":  iaqi.get("pm10", {}).get("v"),
+                        "no2":   iaqi.get("no2",  {}).get("v"),
+                        "o3":    iaqi.get("o3",   {}).get("v"),
+                        "timestamp": data["data"]["time"]["iso"],
+                    })
+                else:
+                    row["error"] = f"AQICN status={row['status']}"
+            except Exception as e:
+                row["status"] = "error"
+                row["error"]  = f"AQICN error={e}"
 
                 # immediately loop again (no delay) until attempts exhausted
 
@@ -188,91 +180,8 @@ def load_preloaded_air_quality(csv_path):
 
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-# def preload_air_quality_data():
-#     for lat, lon in lonlat_grid_points(MIN_LON, MAX_LON, MIN_LAT, MAX_LAT):
-#         try:
-#             # url = (
-#             #     f"http://api.openweathermap.org/data/2.5/air_pollution"
-#             #     f"?lat={lat}&lon={lon}&appid={settings.OPENWEATHER_API_KEY}"
-#             # )
-#             url = (
-#                 f"http://api.openweathermap.org/data/2.5/air_pollution"
-#                 f"?lat={lat}&lon={lon}&appid=43ef469c307359d15fd668155c5d09de"
-#             )
-#             res = requests.get(url, timeout=5)
-#             res.raise_for_status()
-#             pollution = res.json().get("list", [{}])[0]
-#             components = pollution.get("components", {})
-#             PRELOADED_AIR_QUALITY[(lat, lon)] = {
-#                 "pm2_5": components.get("pm2_5", 0),
-#                 "pm10": components.get("pm10", 0),
-#                 "no2": components.get("no2", 0),
-#                 "o3": components.get("o3", 0),
-#                 "co": components.get("co", 0),
-#                 "timestamp": datetime.utcnow().isoformat()
-#             }
-#         except Exception as e:
-#             print(f"Failed to fetch data for {lat},{lon}: {e}")
-
-
 PRELOADED_NOISE = None
 
-def load_preloaded_noise_1(file_path):
-    global PRELOADED_NOISE
-
-    # 1) Read the GML
-    gdf_noise = gpd.read_file(file_path)
-
-    # 2) Ensure WGS84
-    if gdf_noise.crs is None:
-        gdf_noise.set_crs(epsg=4326, inplace=True)
-    if gdf_noise.crs.to_string() != "EPSG:4326":
-        gdf_noise = gdf_noise.to_crs(epsg=4326)
-
-    # 3) Parse CATEGORY → numeric dB
-    def category_to_db(cat: str) -> float | None:
-        s = cat.lower().replace("lden", "")
-        # “Above” bands
-        if s.startswith("ab"):
-            m = re.search(r"\d+", s)
-            return float(m.group()) if m else None
-
-        nums = re.findall(r"\d+", s)
-        # Two-number band (e.g. “45” & “49”)
-        if len(nums) == 2:
-            low, high = map(int, nums)
-            return (low + high) / 2.0
-        # Single 4-digit like “4549”
-        if len(nums) == 1 and len(nums[0]) == 4:
-            t = nums[0]
-            low, high = int(t[:2]), int(t[2:])
-            return (low + high) / 2.0
-        # fallback single number
-        if nums:
-            return float(nums[0])
-        return None
-
-    gdf_noise["noise_db"] = gdf_noise["CATEGORY"].apply(category_to_db)
-
-    # 4) Assign to module global
-    PRELOADED_NOISE = gdf_noise
-  
 
 def load_preloaded_noise(file_path):
     global PRELOADED_NOISE
