@@ -241,7 +241,7 @@ class AirQualityScorer:
             return 0.0
 
         scores = [seg["air_quality_score"] for seg in segments]
-        print(scores)
+        
         l = min(scores)
         a = sum(scores) / len(scores)
         # print(f"l = {l}, a = {a}")
@@ -391,7 +391,10 @@ class NoiseScorer:
         self.noise_metric = PRELOADED_NOISE
         # transformer from WGS84 → UTM33N
         self.to_32633 = Transformer.from_crs("EPSG:4326", "EPSG:32633", always_xy=True).transform
-
+        self.idx = index.Index()
+        self.noise_metric = self.noise_metric.reset_index(drop=True)
+        for i, geom in enumerate(self.noise_metric.geometry):
+            self.idx.insert(i, geom.bounds)
 
     # ───────────────────────────────────
     # Helpers
@@ -464,22 +467,27 @@ class NoiseScorer:
             mid_lat, mid_lon = seg["geometry"][len(seg["geometry"]) // 2]
             pt_utm = Point(mid_lon, mid_lat)                   # WGS84-Punkt     # → UTM 33 N
 
-            # ───────── Polygon-Suche ─────────
-            matches = self.noise_metric[self.noise_metric.geometry.contains(pt_utm)]
+            cand_idx = list(self.idx.intersection((pt_utm.x, pt_utm.y, pt_utm.x, pt_utm.y)))
+            candidates = self.noise_metric.iloc[cand_idx]
+            matches = candidates[candidates.geometry.contains(pt_utm)]
+
             if matches.empty:
            
-                matches = self.noise_metric[self.noise_metric.geometry.intersects(pt_utm.buffer(0.00050))]  # ≈25 m
+                buf = pt_utm.buffer(0.00050)  # ≈25 m
+                cand_idx = list(self.idx.intersection(buf.bounds))
+                candidates = self.noise_metric.iloc[cand_idx]
+                matches = candidates[candidates.geometry.intersects(buf)]
 
             # ───────── dB entnehmen & Score berechnen ─────────
             if not matches.empty:
                 db_val = _extract_db(matches.iloc[0])
                 seg["noise_score"] = self._db_to_score(db_val) if db_val is not None else None
                 seg["noise_db"] = db_val
-                print(f"Point {mid_lat:.5f},{mid_lon:.5f} → {db_val} dB")
+                
             else:
                 seg["noise_score"] = None
                 seg["noise_db"] = None
-                print(f"Point {mid_lat:.5f},{mid_lon:.5f} → no noise data")
+                
 
         return segments
 

@@ -22,6 +22,7 @@ from shapely.ops import transform
 from rtree import index
 from api.services.Data import PRELOADED_AIR_QUALITY
 from rest_framework import status
+import time
 
 
 ACCIDENT_CSV  = r"C:\Users\ahmad\Documents\Projects\ecocycle_navigator\Data\Accidents\accidents_dresden_bikes_2016_2023.csv" 
@@ -122,6 +123,7 @@ def get_rout(request):
         
         segments = air_quality_scorer.annotate_segments(segments)
         segments = noise_scorer.annotate_segments(segments)
+        
         for seg in segments:
             seg["geometry"] = [
                 {"latitude": lat, "longitude": lon}
