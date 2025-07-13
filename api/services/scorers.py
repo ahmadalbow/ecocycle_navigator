@@ -96,7 +96,12 @@ class AccidentScorer(IRouteScorer):
         self, segments: list, accidents_df: pd.DataFrame
     ) -> list:
         now = datetime.utcnow()
-        out = []
+        if accidents_df.empty:
+            for seg in segments:
+                seg["accident_score"] = 10
+                seg["accidents"] = []
+            return segments
+
 
         for seg in segments:
             coords = seg["geometry"] 
@@ -135,6 +140,9 @@ class AccidentScorer(IRouteScorer):
         # print(f"l = {l}, a = {a}")
         route_score = (3 * l + a) / 4.0
         return round(route_score, 2)
+    
+
+
 
 class AirQualityScorer(IRouteScorer):
     # EU index breakpoints (µg/m³) for each pollutant
