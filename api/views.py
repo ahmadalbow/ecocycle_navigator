@@ -58,11 +58,14 @@ def get_accidents(request):
 
 
 @api_view(['GET'])
-def get_rout(request):
+def get_route(request):
     """
-    Return bicycle routes + segment scores.
+    Return bicycle routes + segment scores, with detailed timing instrumentation.
     Expects query params: start_lat, start_lon, end_lat, end_lon
     """
+    # Start total timer
+    start_total = time.perf_counter()
+
     # 1) parse & validate
     try:
         start_lat = float(request.GET['start_lat'])
@@ -73,82 +76,130 @@ def get_rout(request):
         return JsonResponse({'error': 'Invalid or missing coordinates.'}, status=400)
 
     # 2) fetch raw routes
-    tomtom     = TomTomClient("eQRZvUOMU1LkLW7lnk1Jcw1RmMRA39JF")
+    tomtom = TomTomClient("eQRZvUOMU1LkLW7lnk1Jcw1RmMRA39JF")
+    t0 = time.perf_counter()
     raw_routes = tomtom.fetch_routes(
-        (start_lat,start_lon ),
+        (start_lat, start_lon),
         (end_lat,   end_lon),
         travel_mode="bicycle",
-        max_alternatives=3
+        max_alternatives=0
     )
+    fetch_time = time.perf_counter() - t0
+
     if not raw_routes:
         return JsonResponse({'error': 'No routes found.'}, status=404)
 
     # 3) instantiate scorers
-    accident_scorer = AccidentScorer(
-        accident_csv=ACCIDENT_CSV,
-        decay_lambda=0.3,
-        K=1.3,
-        buffer_m=BUFFER_M
-    )
-    traffic_scorer = TrafficScorer(
-        api_key="eQRZvUOMU1LkLW7lnk1Jcw1RmMRA39JF",
-        zoom=14
-    )
+    accident_scorer    = AccidentScorer(accident_csv=ACCIDENT_CSV, decay_lambda=0.3, K=1.3, buffer_m=BUFFER_M)
+    traffic_scorer     = TrafficScorer(api_key="eQRZvUOMU1LkLW7lnk1Jcw1RmMRA39JF", zoom=14)
     air_quality_scorer = AirQualityScorer()
-    noise_scorer = NoiseScorer()
+    noise_scorer       = NoiseScorer()
 
-    # 4) build each route's response
+    # 4) process each route
+    t_routes_start = time.perf_counter()
+    all_acc_subset = []
+    all_segmentation = []
+    all_acc_annot = []
+    all_traffic_annot = []
+    all_air_annot = []
+    all_noise_annot = []
+    all_route_scoring = []
+
     response_routes = []
     for rt in raw_routes:
         geom = rt['geometry']
 
         # a) subset accidents on this route
+        t1 = time.perf_counter()
         acc_on_route_df = accident_scorer.get_accidents_on_route(geom)
+        t_acc_subset = time.perf_counter() - t1
+        all_acc_subset.append(t_acc_subset)
 
         # b) split into ~50m segments
+        t2 = time.perf_counter()
         segments_geo = tomtom.split_geometry(geom, segment_length_m=50.0)
- 
-        # c) per‐segment accident
-        segments = [
-            {"geometry": seg}
-            for seg in segments_geo
-        ]
+        t_segmentation = time.perf_counter() - t2
+        all_segmentation.append(t_segmentation)
 
-        segments = accident_scorer.annotate_segments(
-            segments,
-            acc_on_route_df
-        )
- 
+        # initialize segment dicts
+        segments = [{"geometry": seg} for seg in segments_geo]
+
+        # c) accident annotation
+        t3 = time.perf_counter()
+        segments = accident_scorer.annotate_segments(segments, acc_on_route_df)
+        t_acc_annot = time.perf_counter() - t3
+        all_acc_annot.append(t_acc_annot)
+
+        # d) traffic annotation
+        t4 = time.perf_counter()
         segments = traffic_scorer.annotate_segments(segments)
-        
+        t_traffic_annot = time.perf_counter() - t4
+        all_traffic_annot.append(t_traffic_annot)
+
+        # e) air quality annotation
+        t5 = time.perf_counter()
         segments = air_quality_scorer.annotate_segments(segments)
+        t_air_annot = time.perf_counter() - t5
+        all_air_annot.append(t_air_annot)
+
+        # f) noise annotation
+        t6 = time.perf_counter()
         segments = noise_scorer.annotate_segments(segments)
-        
-        for seg in segments:
-            seg["geometry"] = [
-                {"latitude": lat, "longitude": lon}
-                for lat, lon in seg["geometry"]
-            ]
+        t_noise_annot = time.perf_counter() - t6
+        all_noise_annot.append(t_noise_annot)
 
-        # e) route‐level scores
-        route_score_acc = accident_scorer.score_route(segments)
+        # g) route-level scoring
+        t7 = time.perf_counter()
+        route_score_acc     = accident_scorer.score_route(segments)
+        route_score_traffic = traffic_scorer.score_route(segments)
+        route_score_air     = air_quality_scorer.score_route(segments)
+        route_score_noise   = noise_scorer.score_route(segments)
+        t_route_score = time.perf_counter() - t7
+        all_route_scoring.append(t_route_score)
 
-
+        # prepare JSON-friendly geometry
         response_routes.append({
-            'distance_m':      rt['distance_m'],
-            'duration_s':      rt['travel_time_s'],
-            'geometry':        [
-                {'latitude': lat, 'longitude': lon}
-                for lat,lon in geom
+            'distance_m':        rt['distance_m'],
+            'duration_s':        rt['travel_time_s'],
+            'geometry':          [{'latitude': lat, 'longitude': lon} for lat, lon in geom],
+            'segments':          [
+                {
+                    'geometry': [{'latitude': lat, 'longitude': lon} for lat, lon in seg['geometry']],
+                    'accident_score': seg.get('accident_score'),
+                    'traffic_score': seg.get('traffic_score'),
+                    'air_quality_score': seg.get('air_quality_score'),
+                    'noise_score': seg.get('noise_score'),
+                }
+                for seg in segments
             ],
-            'segments':        segments,
-            'accident_score': round(route_score_acc, 2),
-            "traffic_score": traffic_scorer.score_route(segments),
-            "air_quality_score": air_quality_scorer.score_route(segments),
-            "noise_score": noise_scorer.score_route(segments)
-
+            'accident_score':     round(route_score_acc, 2),
+            'traffic_score':      round(route_score_traffic, 2),
+            'air_quality_score':  round(route_score_air, 2),
+            'noise_score':        round(route_score_noise, 2),
         })
-       
+
+    total_routes_time = time.perf_counter() - t_routes_start
+    total_time = time.perf_counter() - start_total
+
+    # Compute averages
+    n = len(raw_routes)
+    performance = {
+        'fetch_time_s':       round(fetch_time, 10),
+        'avg_acc_subset_s':   round(sum(all_acc_subset) / n, 10),
+        'avg_acc_annot_s':    round(sum(all_acc_annot) / n, 10),
+        'avg_traffic_annot_s':round(sum(all_traffic_annot) / n, 10),
+        'avg_air_annot_s':    round(sum(all_air_annot) / n, 10),
+        'avg_noise_annot_s':  round(sum(all_noise_annot) / n, 10),
+        'total_routes_time_s':round(total_routes_time, 10),
+        'total_time_s':       round(total_time, 10),
+    }
+
+    # Print performance to console for logging
+    print("=== EcoCycle Navigator Performance Metrics ===")
+    for k, v in performance.items():
+        print(f"{k}: {v}s")
+    print("=============================================")
+
     return JsonResponse({'routes': response_routes}, status=200)
 
 import math
