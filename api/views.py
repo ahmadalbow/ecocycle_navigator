@@ -23,6 +23,7 @@ from rtree import index
 from api.services.Data import PRELOADED_AIR_QUALITY
 from rest_framework import status
 import time
+import api.apps as api_apps
 
 
 ACCIDENT_CSV  = r"C:\Users\ahmad\Documents\Projects\ecocycle_navigator\Data\Accidents\accidents_dresden_bikes_2016_2023.csv" 
@@ -32,28 +33,6 @@ BUFFER_M = 10.0
 
 
 
-@api_view(['GET'])
-def get_accidents(request):
-    """
-    Return all bike‐involved accidents as JSON:
-      [{ id, latitude, longitude, timestamp }, ...]
-    """
-    df = pd.read_csv(ACCIDENT_CSV)
-    
-
-    # human‐readable timestamp
-    df['timestamp'] = df.apply(
-        lambda r: f"{int(r.UJAHR)}-{int(r.UMONAT):02d} {int(r.USTUNDE):02d}:00",
-        axis=1
-    )
-    df = df.reset_index(drop=True)
-    df['id'] = df.index
-
-    out = df[['id','lat','lon','timestamp']].rename(
-        columns={'lat':'latitude','lon':'longitude'}
-    ).to_dict(orient='records')
-
-    return JsonResponse({'accidents': out}, status=200)
 
 
 
@@ -90,10 +69,10 @@ def get_route(request):
         return JsonResponse({'error': 'No routes found.'}, status=404)
 
     # 3) instantiate scorers
-    accident_scorer    = AccidentScorer(accident_csv=ACCIDENT_CSV, decay_lambda=0.3, K=1.3, buffer_m=BUFFER_M)
-    traffic_scorer     = TrafficScorer(api_key="eQRZvUOMU1LkLW7lnk1Jcw1RmMRA39JF", zoom=14)
-    air_quality_scorer = AirQualityScorer()
-    noise_scorer       = NoiseScorer()
+    accident_scorer = api_apps.accident_scorer
+    traffic_scorer = api_apps.traffic_scorer
+    air_quality_scorer = api_apps.air_quality_scorer
+    noise_scorer = api_apps.noise_scorer
 
     # 4) process each route
     t_routes_start = time.perf_counter()
@@ -226,6 +205,31 @@ def get_traffic_flow(request):
 def get_noise(request):
     features = json.loads(PRELOADED_NOISE.to_json())["features"]
     return JsonResponse({"type": "FeatureCollection", "features": features}, status=200)
+
+
+
+@api_view(['GET'])
+def get_accidents(request):
+    """
+    Return all bike‐involved accidents as JSON:
+      [{ id, latitude, longitude, timestamp }, ...]
+    """
+    df = pd.read_csv(ACCIDENT_CSV)
+    
+
+    # human‐readable timestamp
+    df['timestamp'] = df.apply(
+        lambda r: f"{int(r.UJAHR)}-{int(r.UMONAT):02d} {int(r.USTUNDE):02d}:00",
+        axis=1
+    )
+    df = df.reset_index(drop=True)
+    df['id'] = df.index
+
+    out = df[['id','lat','lon','timestamp']].rename(
+        columns={'lat':'latitude','lon':'longitude'}
+    ).to_dict(orient='records')
+
+    return JsonResponse({'accidents': out}, status=200)
 
 
 # @api_view(['GET'])
