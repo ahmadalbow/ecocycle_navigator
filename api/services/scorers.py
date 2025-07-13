@@ -1,22 +1,21 @@
 
-import pandas as pd
+from __future__ import annotations
 import math
+import os
+import sys
+from datetime import datetime
+from typing import Any, List, Dict
 import pandas as pd
-
 import pyproj
-import os, sys
-import math
-import pyproj
+from pyproj import Transformer
 import mapbox_vector_tile  # pip install mapbox-vector-tile
 import requests
-from shapely.ops import transform as shp_transform
-
-
 from shapely.ops import transform
 from datetime import datetime
 from typing import List, Any
 from rtree import index
 from shapely.geometry import Point,LineString, MultiLineString
+
 # get the folder two levels up from this file:
 root = os.path.abspath(os.path.join(__file__, os.pardir, os.pardir, os.pardir))
 if root not in sys.path:
@@ -27,22 +26,25 @@ from ecocycle_navigator import settings
 from api.services.tomtom_client import TomTomClient
 from api.services.Data import PRELOADED_NOISE, PRELOADED_TILES, load_preloaded_noise
 from api.services.Data import PRELOADED_AIR_QUALITY
+from abc import ABC, abstractmethod
 
-class BaseScorer:
-    """
-    Abstract interface for any route/segment‐level scorer.
-    """
-    def score_segment(self, segment: Any) -> float:
+
+class IRouteScorer(ABC):
+    """Interface for classes that annotate and score route segments."""
+
+    @abstractmethod
+    def annotate_segments(self, segments: List[Dict]) -> List[Dict]:
+        """Add scoring information to each segment."""
         raise NotImplementedError
 
-    def score_route(self, segments: List[Any]) -> float:
-        # Default: average of segment scores
-        scores = [self.score_segment(s) for s in segments]
-        return sum(scores) / len(scores) if scores else 0.0
+    @abstractmethod
+    def score_route(self, segments: List[Dict]) -> float:
+        """Return a numeric score for the entire route."""
+        raise NotImplementedError
 
 
 
-class AccidentScorer:
+class AccidentScorer(IRouteScorer):
     def __init__(
         self,
         accident_csv: str,
@@ -133,7 +135,7 @@ class AccidentScorer:
         route_score = (3 * l + a) / 4.0
         return round(route_score, 2)
 
-class AirQualityScorer:
+class AirQualityScorer(IRouteScorer):
     # EU index breakpoints (µg/m³) for each pollutant
     EU_THRESHOLDS = {
         "pm25": [10, 20, 25, 50, 75],    # Good ≤10, Fair ≤20, Mod ≤25, Poor ≤50, VeryPoor ≤75
@@ -255,7 +257,7 @@ class AirQualityScorer:
 
 
 
-class TrafficScorer:
+class TrafficScorer(IRouteScorer):
     def __init__(self, api_key: str, zoom: int = 12, flow_type: str = 'relative'):
         """
         API-Key und Zoom-Level setzen. flow_type: 'relative' oder 'absolute'.
@@ -368,16 +370,7 @@ class TrafficScorer:
         return (sum(scores) / len(scores)) if scores else 0.0
 
 
-
-
-
-import rasterio
-from rasterio.enums import Resampling
-from pyproj import Transformer
-from shapely.geometry import LineString, Point
-from typing import List, Dict, Any
-
-class NoiseScorer:
+class NoiseScorer(IRouteScorer):
     """
     Rate each road segment’s noise exposure (road-traffic L_den dB(A))
     and convert it to a 1–10 comfort score for cyclists.
