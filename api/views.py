@@ -51,6 +51,7 @@ def get_route(request):
         start_lon = float(request.GET['start_lon'])
         end_lat   = float(request.GET['end_lat'])
         end_lon   = float(request.GET['end_lon'])
+        max_alternatives =int(request.GET['max_routes']) 
     except (KeyError, ValueError):
         return JsonResponse({'error': 'Invalid or missing coordinates.'}, status=400)
 
@@ -61,13 +62,14 @@ def get_route(request):
         (start_lat, start_lon),
         (end_lat,   end_lon),
         travel_mode="bicycle",
-        max_alternatives=0
+        max_alternatives=max_alternatives
     )
     fetch_time = time.perf_counter() - t0
 
     if not raw_routes:
         return JsonResponse({'error': 'No routes found.'}, status=404)
 
+    
     # 3) instantiate scorers
     accident_scorer = api_apps.accident_scorer
     traffic_scorer = api_apps.traffic_scorer
@@ -164,11 +166,11 @@ def get_route(request):
     n = len(raw_routes)
     performance = {
         'fetch_time_s':       round(fetch_time, 10),
-        'avg_acc_subset_s':   round(sum(all_acc_subset) / n, 10),
-        'avg_acc_annot_s':    round(sum(all_acc_annot) / n, 10),
-        'avg_traffic_annot_s':round(sum(all_traffic_annot) / n, 10),
-        'avg_air_annot_s':    round(sum(all_air_annot) / n, 10),
-        'avg_noise_annot_s':  round(sum(all_noise_annot) / n, 10),
+        'avg_acc_subset_s':   round(sum(all_acc_subset) , 10),
+        'avg_acc_annot_s':    round(sum(all_acc_annot) , 10),
+        'avg_traffic_annot_s':round(sum(all_traffic_annot) , 10),
+        'avg_air_annot_s':    round(sum(all_air_annot) , 10),
+        'avg_noise_annot_s':  round(sum(all_noise_annot) , 10),
         'total_routes_time_s':round(total_routes_time, 10),
         'total_time_s':       round(total_time, 10),
     }

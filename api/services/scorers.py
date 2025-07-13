@@ -21,6 +21,7 @@ root = os.path.abspath(os.path.join(__file__, os.pardir, os.pardir, os.pardir))
 if root not in sys.path:
     sys.path.insert(0, root)
 
+from api.services import Data
 from ecocycle_navigator import settings
 # now absolute imports from 'api' will work:
 from api.services.tomtom_client import TomTomClient
@@ -381,7 +382,7 @@ class NoiseScorer(IRouteScorer):
         # --- NEW: prepare a metric‐projected noise GDF once ---
         global PRELOADED_NOISE
         # assume PRELOADED_NOISE is loaded in EPSG:4326
-        self.noise_metric = PRELOADED_NOISE
+        self.noise_metric = Data.PRELOADED_NOISE
         # transformer from WGS84 → UTM33N
         self.to_32633 = Transformer.from_crs("EPSG:4326", "EPSG:32633", always_xy=True).transform
         self.idx = index.Index()
