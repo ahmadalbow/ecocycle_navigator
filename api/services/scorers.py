@@ -102,7 +102,7 @@ class AccidentScorer(IRouteScorer):
                 seg["accidents"] = []
             return segments
 
-
+        print("hey")
         for seg in segments:
             coords = seg["geometry"] 
             line      = LineString([(p[1], p[0]) for p in coords])
